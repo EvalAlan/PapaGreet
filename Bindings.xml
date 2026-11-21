@@ -1,0 +1,9 @@
+<Bindings>
+  <Binding name="PAPAGREET_GREET" header="PapaGreet" category="ADDONS">PapaGreet_SendGreeting()</Binding>
+  <Binding category="ADDONS" name="PAPAGREET_GOODBYE">PapaGreet_SendGoodbye()</Binding>
+  <Binding category="ADDONS" name="PAPAGREET_LEAVE">PapaGreet_SendGoodbyeAndLeave()</Binding>
+  <Binding category="ADDONS" name="PAPAGREET_NEARBY">PapaGreet_SendNearbyGreeting()</Binding>
+  <Binding category="ADDONS" name="PAPAGREET_CAMP">PapaGreet_SendCampGreeting()</Binding>
+  <Binding category="ADDONS" name="PAPAGREET_CANCEL">PapaGreet_CancelLeave()</Binding>
+  <Binding category="ADDONS" name="PAPAGREET_MENU">PapaGreet_ToggleMenu()</Binding>
+</Bindings>

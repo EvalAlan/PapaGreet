@@ -1,5 +1,5 @@
 -- PapaGreetMenu.lua
--- Version: 1.3.0 - Midnight Compatible
+-- Version: 1.4.0
 
 -- Localize globals for performance
 local CreateFrame = CreateFrame
@@ -58,9 +58,11 @@ local function InitializeVariables()
         goodbyeEmotes = {},
         delayEmote = 3,
         delayLeave = 8,
+        nearbyGreetings = {"Well met, traveler!", "Safe travels!"},
+        campGreetings = {"Mind if I join you by the fire?", "A fine place to rest. Well met!"},
     }
     PapaGreetSavedVariables.currentProfile = PapaGreetSavedVariables.currentProfile or DEFAULT_PROFILE
-    
+
     -- Ensure all profiles have necessary fields
     for name, profile in pairs(PapaGreetSavedVariables.profiles) do
         profile.greetings = profile.greetings or {}
@@ -69,7 +71,10 @@ local function InitializeVariables()
         profile.goodbyeEmotes = profile.goodbyeEmotes or {}
         profile.delayEmote = profile.delayEmote or 3
         profile.delayLeave = profile.delayLeave or 8
-        profile.cooldown = profile.cooldown or 3
+        if profile.cooldown == nil then profile.cooldown = 3 end
+        profile.nearbyGreetings = profile.nearbyGreetings or {"Well met, traveler!", "Safe travels!"}
+        profile.campGreetings = profile.campGreetings or {"Mind if I join you by the fire?", "A fine place to rest. Well met!"}
+        if profile.autoLeave == nil then profile.autoLeave = not (select(4, GetBuildInfo()) >= 16000 and select(4, GetBuildInfo()) < 17000) end
     end
 end
 
@@ -83,138 +88,85 @@ local function RefreshPapaGreetMenu()
     if emoteDelayEditBox then
         emoteDelayEditBox:SetText(math_floor(PapaGreetSavedVariables.profiles[currentProfile].delayEmote or 3))
     end
-    
+
     local leaveDelayEditBox = _G["PapaGreetLeaveDelayEditBox"]
     if leaveDelayEditBox then
         leaveDelayEditBox:SetText(math_floor(PapaGreetSavedVariables.profiles[currentProfile].delayLeave or 8))
     end
-    
+
     local cooldownEditBox = _G["PapaGreetCooldownEditBox"]
     if cooldownEditBox then
         cooldownEditBox:SetText(math_floor(PapaGreetSavedVariables.profiles[currentProfile].cooldown or 3))
     end
-    
+
     UIDropDownMenu_SetSelectedValue(PapaGreetProfileDropdown, currentProfile)
+    local autoLeave = _G["PapaGreetAutoLeaveCheck"]
+    if autoLeave then autoLeave:SetChecked(PapaGreetSavedVariables.profiles[currentProfile].autoLeave) end
 end
 
 -- Helper function to create buttons
 local function createButton(name, parent, point, offsetX, offsetY, width, height, text, popup)
-    print("PapaGreet DEBUG: Creating button: " .. name .. " with text: " .. text)
     local btn = CreateFrame("Button", name, parent, "UIPanelButtonTemplate")
     btn:SetPoint(point, offsetX, offsetY)
     btn:SetSize(width, height)
     btn:SetText(text)
-    
-    -- Test if button was created properly
-    print("PapaGreet DEBUG: Button created - Name: " .. (btn:GetName() or "nil") .. ", Text: " .. (btn:GetText() or "nil"))
-    
-    -- Test if button is interactive
-    btn:SetScript("OnEnter", function()
-        print("PapaGreet DEBUG: Mouse entered button: " .. text)
-    end)
-    
     btn:SetScript("OnClick", function()
-        print("PapaGreet DEBUG: ===== BUTTON CLICKED =====")
-        print("PapaGreet DEBUG: Button text: " .. text)
-        print("PapaGreet DEBUG: Popup: " .. tostring(popup))
-        print("PapaGreet DEBUG: Current profile: " .. tostring(currentProfile))
-        print("PapaGreet DEBUG: Button enabled: " .. tostring(btn:IsEnabled()))
-        print("PapaGreet DEBUG: Button visible: " .. tostring(btn:IsVisible()))
-        print("PapaGreet DEBUG: Button shown: " .. tostring(btn:IsShown()))
-        
-        -- Test if ANY button click works
-        if text == "Create Profile" then
-            print("PapaGreet DEBUG: CREATE PROFILE BUTTON CLICKED!")
-        end
-        
-        -- Check if trying to modify Default profile
-        if currentProfile == DEFAULT_PROFILE and (popup == "PAPA_GREET_ADD_GREETING" or 
-           popup == "PAPA_GREET_ADD_GOODBYE" or popup == "PAPA_GREET_ADD_GREETING_EMOTE" or 
-           popup == "PAPA_GREET_ADD_GOODBYE_EMOTE") then
-            UIErrorsFrame:AddMessage("Cannot modify Default profile. Create a new profile first.", 1.0, 0.0, 0.0)
-            return
-        end
-        
-        if popup then
-            print("PapaGreet DEBUG: Attempting to show popup: " .. popup)
-            if StaticPopupDialogs[popup] then
-                print("PapaGreet DEBUG: Popup definition found!")
-                
-                -- Hide any existing dialogs first
-                StaticPopup_Hide(popup)
-                
-                -- Force the dialog to appear
-                local dialog = StaticPopup_Show(popup)
-                if dialog then
-                    print("PapaGreet DEBUG: Popup shown successfully")
-                    print("PapaGreet DEBUG: Dialog frame strata: " .. dialog:GetFrameStrata())
-                    print("PapaGreet DEBUG: Dialog is shown: " .. tostring(dialog:IsShown()))
-                    dialog:Raise()
-                else
-                    print("PapaGreet ERROR: StaticPopup_Show returned nil!")
-                    print("PapaGreet DEBUG: Checking for conflicts...")
-                    for i = 1, 4 do
-                        local activeDialog = _G["StaticPopup" .. i]
-                        if activeDialog and activeDialog:IsShown() then
-                            print("  StaticPopup" .. i .. " is already shown: " .. tostring(activeDialog.which))
-                        end
-                    end
-                end
-            else
-                print("PapaGreet ERROR: Popup " .. popup .. " not found in StaticPopupDialogs!")
-                print("PapaGreet DEBUG: Available popups:")
-                for k, v in pairs(StaticPopupDialogs) do
-                    if k:match("PAPA_GREET") then
-                        print("  - " .. k)
-                    end
-                end
-            end
-        else
-            print("PapaGreet ERROR: No popup name provided!")
-        end
+        if popup then StaticPopup_Show(popup) end
     end)
     return btn
 end
 
--- Helper function to create dropdown menus for deleting items
-local function createDeleteDropdown(name, parent, point, offsetX, offsetY, width, itemsKey)
+-- One submenu per entry keeps edit and delete actions together.
+local function createManageDropdown(name, parent, point, offsetX, offsetY, width, itemsKey)
     local dropdown = CreateFrame("Frame", name, parent, "UIDropDownMenuTemplate")
     dropdown:SetPoint(point, parent, point, offsetX - 15, offsetY)
     dropdown:SetSize(width, 25)
 
-    UIDropDownMenu_Initialize(dropdown, function(self, level)
-        if currentProfile == DEFAULT_PROFILE then
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = "Cannot modify Default profile"
-            info.disabled = true
-            UIDropDownMenu_AddButton(info, level)
+    UIDropDownMenu_Initialize(dropdown, function(self, level, menuList)
+        if level == 2 then
+            if not menuList then return end
+            local data = menuList
+            local items = PapaGreetSavedVariables.profiles[data.profile][data.key]
+            if items[data.index] ~= data.original then return end
+            local editInfo = UIDropDownMenu_CreateInfo()
+            editInfo.text = "Edit"
+            editInfo.notCheckable = true
+            editInfo.func = function()
+                CloseDropDownMenus()
+                StaticPopup_Show("PAPA_GREET_EDIT_ITEM", nil, nil, data)
+            end
+            UIDropDownMenu_AddButton(editInfo, level)
+            local deleteInfo = UIDropDownMenu_CreateInfo()
+            deleteInfo.text = "Delete"
+            deleteInfo.notCheckable = true
+            deleteInfo.func = function()
+                if items[data.index] == data.original then
+                    table_remove(items, data.index)
+                    RefreshPapaGreetMenu()
+                end
+                CloseDropDownMenus()
+            end
+            UIDropDownMenu_AddButton(deleteInfo, level)
             return
         end
-        
         local items = PapaGreetSavedVariables.profiles[currentProfile][itemsKey]
         if #items == 0 then
             local info = UIDropDownMenu_CreateInfo()
-            info.text = "No items to delete"
+            info.text = "No entries"
             info.disabled = true
             UIDropDownMenu_AddButton(info, level)
             return
         end
-        
         for i, item in ipairs(items) do
             local info = UIDropDownMenu_CreateInfo()
-            info.text = "Delete " .. item
-            info.func = function()
-                table_remove(items, i)
-                RefreshPapaGreetMenu()
-                CloseDropDownMenus()
-            end
+            info.text = item
+            info.notCheckable = true
+            info.hasArrow = true
+            info.menuList = {profile = currentProfile, key = itemsKey, index = i, original = item}
             UIDropDownMenu_AddButton(info, level)
         end
     end)
-    
-    -- Set default button text
-    UIDropDownMenu_SetText(dropdown, "Delete...")
-    
+    UIDropDownMenu_SetText(dropdown, "Edit / Delete...")
     return dropdown
 end
 
@@ -246,19 +198,16 @@ StaticPopupDialogs["PAPA_GREET_CREATE_PROFILE"] = {
         -- or we need to get it from the wndchild1 (editBox1)
         local editBox = _G[self:GetName().."EditBox"] or _G[self:GetName().."WideEditBox"]
         local editBoxText = editBox and editBox:GetText() or ""
-        
+
         local profileName = sanitizeInput(editBoxText, MAX_PROFILE_NAME_LENGTH)
-        print("PapaGreet DEBUG: After sanitize: " .. tostring(profileName))
-        
+
         if profileName then
             if PapaGreetSavedVariables.profiles[profileName] then
                 print("Profile '" .. profileName .. "' already exists.")
             else
-                print("PapaGreet DEBUG: Creating new profile: " .. profileName)
                 PapaGreetSavedVariables.profiles[profileName] = deepcopy(PapaGreetSavedVariables.profiles[currentProfile])
                 currentProfile = profileName
                 PapaGreetSavedVariables.currentProfile = currentProfile
-                print("PapaGreet DEBUG: About to refresh menu")
                 RefreshPapaGreetMenu()
                 print("Profile '" .. profileName .. "' created.")
             end
@@ -484,6 +433,71 @@ StaticPopupDialogs["PAPA_GREET_ADD_GOODBYE_EMOTE"] = {
     end
 }
 
+local function AddContextGreetingPopup(key, label)
+    return {
+        text = "Enter the " .. label .. " greeting:",
+        button1 = "Add", button2 = "Cancel", hasEditBox = true,
+        timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+        OnShow = function(self)
+            self:SetFrameStrata("TOOLTIP")
+            local editBox = _G[self:GetName() .. "EditBox"] or _G[self:GetName() .. "WideEditBox"]
+            if editBox then editBox:SetText(""); editBox:SetFocus() end
+        end,
+        OnAccept = function(self)
+            local editBox = _G[self:GetName() .. "EditBox"] or _G[self:GetName() .. "WideEditBox"]
+            local greeting = sanitizeInput(editBox and editBox:GetText(), MAX_MESSAGE_LENGTH)
+            if greeting then
+                table_insert(PapaGreetSavedVariables.profiles[currentProfile][key], greeting)
+                RefreshPapaGreetMenu()
+            end
+        end,
+        EditBoxOnEnterPressed = function(self) StaticPopup_OnClick(self:GetParent(), 1) end,
+        EditBoxOnEscapePressed = function(self) StaticPopup_OnClick(self:GetParent(), 2) end,
+    }
+end
+
+StaticPopupDialogs["PAPA_GREET_ADD_NEARBY"] = AddContextGreetingPopup("nearbyGreetings", "nearby")
+StaticPopupDialogs["PAPA_GREET_ADD_CAMP"] = AddContextGreetingPopup("campGreetings", "campsite")
+
+StaticPopupDialogs["PAPA_GREET_EDIT_ITEM"] = {
+    text = "Edit this entry:",
+    button1 = "Save", button2 = "Cancel", hasEditBox = true,
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+    OnShow = function(self)
+        self:SetFrameStrata("TOOLTIP")
+        local data = self.data
+        local editBox = _G[self:GetName() .. "EditBox"] or _G[self:GetName() .. "WideEditBox"]
+        if editBox and data then
+            local isEmote = data.key == "greetingEmotes" or data.key == "goodbyeEmotes"
+            editBox:SetMaxLetters(isEmote and MAX_EMOTE_LENGTH or MAX_MESSAGE_LENGTH)
+            editBox:SetText(data.original)
+            editBox:HighlightText()
+            editBox:SetFocus()
+        end
+    end,
+    OnAccept = function(self)
+        local data = self.data
+        if not data then return end
+        local profile = PapaGreetSavedVariables.profiles[data.profile]
+        local items = profile and profile[data.key]
+        if not items or items[data.index] ~= data.original then
+            print("Entry changed. Open the menu again before editing it.")
+            return
+        end
+        local editBox = _G[self:GetName() .. "EditBox"] or _G[self:GetName() .. "WideEditBox"]
+        local isEmote = data.key == "greetingEmotes" or data.key == "goodbyeEmotes"
+        local value = sanitizeInput(editBox and editBox:GetText(), isEmote and MAX_EMOTE_LENGTH or MAX_MESSAGE_LENGTH)
+        if not value then
+            print("Entry cannot be empty.")
+            return
+        end
+        items[data.index] = value
+        RefreshPapaGreetMenu()
+    end,
+    EditBoxOnEnterPressed = function(self) StaticPopup_OnClick(self:GetParent(), 1) end,
+    EditBoxOnEscapePressed = function(self) StaticPopup_OnClick(self:GetParent(), 2) end,
+}
+
 -- Show the menu
 function ShowPapaGreetMenu()
     -- Reuse existing frame if it exists
@@ -492,9 +506,9 @@ function ShowPapaGreetMenu()
         RefreshPapaGreetMenu()
         return
     end
-    
+
     local menu = CreateFrame("Frame", "PapaGreetMenu", UIParent, "BasicFrameTemplate")
-    menu:SetSize(380, 420) -- Increased height to accommodate new elements
+    menu:SetSize(380, 555)
     menu:SetPoint("CENTER")
     menu:SetFrameStrata("DIALOG")
     menu:SetMovable(true)
@@ -569,21 +583,34 @@ function ShowPapaGreetMenu()
     createDelay("Leave Delay (seconds):", "PapaGreetLeaveDelayEditBox", -160, "delayLeave", 8)
     createDelay("Cooldown (seconds, 0=off):", "PapaGreetCooldownEditBox", -200, "cooldown", 3)
 
-    -- Create Add Greeting Button and Delete Greeting Dropdown
+    -- Create Add Greeting Button and Greeting Management Dropdown
     createButton("PapaGreetAddGreetingButton", menu, "TOPLEFT", 20, -240, 140, 27, "Add Greeting", "PAPA_GREET_ADD_GREETING")
-    createDeleteDropdown("PapaGreetDeleteGreetingDropdown", menu, "TOPLEFT", 180, -240, 140, "greetings")
+    createManageDropdown("PapaGreetDeleteGreetingDropdown", menu, "TOPLEFT", 180, -240, 140, "greetings")
 
-    -- Create Add Goodbye Button and Delete Goodbye Dropdown
+    -- Create Add Goodbye Button and Goodbye Management Dropdown
     createButton("PapaGreetAddGoodbyeButton", menu, "TOPLEFT", 20, -280, 140, 27, "Add Goodbye", "PAPA_GREET_ADD_GOODBYE")
-    createDeleteDropdown("PapaGreetDeleteGoodbyeDropdown", menu, "TOPLEFT", 180, -280, 140, "goodbyes")
+    createManageDropdown("PapaGreetDeleteGoodbyeDropdown", menu, "TOPLEFT", 180, -280, 140, "goodbyes")
 
-    -- Create Add Greeting Emote Button and Delete Greeting Emote Dropdown
+    -- Create Add Greeting Emote Button and Greeting Emote Management Dropdown
     createButton("PapaGreetAddGreetingEmoteButton", menu, "TOPLEFT", 20, -320, 140, 27, "Add Greeting Emote", "PAPA_GREET_ADD_GREETING_EMOTE")
-    createDeleteDropdown("PapaGreetDeleteGreetingEmoteDropdown", menu, "TOPLEFT", 180, -320, 140, "greetingEmotes")
+    createManageDropdown("PapaGreetDeleteGreetingEmoteDropdown", menu, "TOPLEFT", 180, -320, 140, "greetingEmotes")
 
-    -- Create Add Goodbye Emote Button and Delete Goodbye Emote Dropdown
+    -- Create Add Goodbye Emote Button and Goodbye Emote Management Dropdown
     createButton("PapaGreetAddGoodbyeEmoteButton", menu, "TOPLEFT", 20, -360, 140, 27, "Add Goodbye Emote", "PAPA_GREET_ADD_GOODBYE_EMOTE")
-    createDeleteDropdown("PapaGreetDeleteGoodbyeEmoteDropdown", menu, "TOPLEFT", 180, -360, 140, "goodbyeEmotes")
+    createManageDropdown("PapaGreetDeleteGoodbyeEmoteDropdown", menu, "TOPLEFT", 180, -360, 140, "goodbyeEmotes")
+
+    -- Nearby and campsite greetings are deliberate SAY actions.
+    createButton("PapaGreetAddNearbyButton", menu, "TOPLEFT", 20, -400, 140, 27, "Add Nearby", "PAPA_GREET_ADD_NEARBY")
+    createManageDropdown("PapaGreetDeleteNearbyDropdown", menu, "TOPLEFT", 180, -400, 140, "nearbyGreetings")
+    createButton("PapaGreetAddCampButton", menu, "TOPLEFT", 20, -440, 140, 27, "Add Campsite", "PAPA_GREET_ADD_CAMP")
+    createManageDropdown("PapaGreetDeleteCampDropdown", menu, "TOPLEFT", 180, -440, 140, "campGreetings")
+
+    local autoLeave = CreateFrame("CheckButton", "PapaGreetAutoLeaveCheck", menu, "UICheckButtonTemplate")
+    autoLeave:SetPoint("TOPLEFT", menu, "TOPLEFT", 20, -480)
+    _G[autoLeave:GetName() .. "Text"]:SetText("Leave group after goodbye")
+    autoLeave:SetScript("OnClick", function(self)
+        PapaGreetSavedVariables.profiles[currentProfile].autoLeave = self:GetChecked() and true or false
+    end)
 
     -- Refresh the menu after creating all elements
     RefreshPapaGreetMenu()

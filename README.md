@@ -2,6 +2,10 @@
 
 PapaGreet is a World of Warcraft addon that automates greetings and farewells in groups with customizable messages and emotes.
 
+## WoW Forever
+
+Forever uses interface `16001`. Install the addon in `_forever_/Interface/AddOns/PapaGreet` with `PapaGreet.toc`, the Lua files, `Bindings.xml`, and `Media/Greeting.tga`. Existing character profiles are migrated without replacing their messages. Forever defaults to goodbye without leaving; use the profile checkbox or `/papa leave` to leave explicitly. Nearby and campsite greetings are manual actions, not automatic proximity detection. Default now includes more nearby and campsite lines, and its messages and emotes can be edited.
+
 ## Installation
 
 To install PapaGreet, follow these steps:
@@ -17,27 +21,27 @@ PapaGreet adds a movable button to your screen with the following controls:
 ### Button Controls
 
 - **Left Click**: Send a random greeting and emote
-- **Right Click**: Send a random goodbye, emote, and leave the group after a delay
+- **Right Click**: Send a random goodbye and emote; optionally leave the group after a delay (off by default in Forever)
 - **Ctrl+Left Click**: Open the settings menu
-- **Ctrl+Right Click**: Cancel the pending leave group action
+- **Ctrl+Right Click**: Cancel the pending farewell/leave action
+- **Alt+Left Click**: Send a nearby greeting in SAY
+- **Alt+Right Click**: Send a campsite greeting in SAY
 - **Shift+Left Click**: Open the LFD (Dungeon Finder) interface
 - **Shift+Right Click**: Open the PVP interface
 - **Middle Mouse Drag**: Move the button (position is saved)
 
 ### Chat Channels
 
-Messages are automatically sent to the appropriate channel:
-- **Party**: When in a dungeon/raid group
-- **Instance Chat**: When in instanced content
-- **Say**: When solo
+Messages go to PARTY, RAID, or INSTANCE_CHAT according to your actual group type. Solo greetings use SAY. Nearby and campsite greetings always use SAY.
 
 ### Settings Menu
 
 Access the settings menu with **Ctrl+Left Click** or the `/papa menu` command.
 
 From the menu you can:
-- Create, delete, and copy profiles
-- Add/remove custom greetings and goodbyes
+- Create, delete, and copy custom profiles; edit the built-in Default profile
+- Add, edit, and delete custom greetings, goodbyes, nearby greetings, campsite greetings, and emotes
+- Choose whether right-click goodbye also leaves the group
 - Add/remove custom emotes for greetings and goodbyes
 - Adjust emote delay (time between message and emote)
 - Adjust leave delay (time between goodbye and leaving group)
@@ -56,7 +60,11 @@ PapaGreet includes an optional cooldown system to prevent accidental spam:
 Type `/papa` to see all available commands:
 
 - `/papa greet` - Send greeting now
-- `/papa bye` - Send goodbye and start leave timer
+- `/papa bye` - Send goodbye, using the profile leave setting
+- `/papa byeonly` - Send goodbye without leaving
+- `/papa leave` - Send goodbye and leave after the configured delay
+- `/papa nearby` - Send a nearby greeting in SAY
+- `/papa camp` - Send a campsite greeting in SAY
 - `/papa cancel` - Cancel the pending leave action
 - `/papa menu` - Toggle the settings menu
 - `/papa hide` - Hide the button
@@ -70,17 +78,19 @@ Type `/papa` to see all available commands:
 PapaGreet supports custom keybindings that can be configured in the WoW keybinding menu (ESC → Keybinds → PapaGreet):
 
 - **Send Greeting** - Trigger a greeting without clicking the button
-- **Send Goodbye & Leave** - Trigger goodbye and leave timer without clicking
+- **Send Goodbye** - Trigger goodbye using the profile leave setting
+- **Send Goodbye & Leave** - Explicitly trigger goodbye and leave
+- **Nearby Greeting** and **Campsite Greeting** - Send the corresponding SAY message
 - **Cancel Leave** - Cancel the pending leave action
 - **Toggle Menu** - Open/close the settings menu
 
 ### Visual Countdown
 
-When you trigger a goodbye, a countdown timer appears on the button showing seconds remaining before auto-leaving the group. This gives you a clear visual indicator and time to cancel if needed.
+When a goodbye is set to leave the group, a countdown timer appears on the button showing seconds remaining before auto-leaving the group. This gives you a clear visual indicator and time to cancel if needed.
 
 ### Combat-Safe Queueing
 
-If you try to send a greeting while in combat, it will be automatically queued and sent when you leave combat. You'll see a notification that the greeting was queued, and another when it's sent after combat ends.
+If you try to send a greeting or goodbye while in combat, it will be queued until combat ends. A queued goodbye with a pending leave can be canceled before it sends. You'll see a notification when a message is queued.
 
 ### Future-Proof Architecture
 

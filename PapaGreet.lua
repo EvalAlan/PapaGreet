@@ -17,12 +17,13 @@ function PapaGreetAPI:Initialize()
     local apiVersion = select(4, GetBuildInfo())
     self.isMidnight = apiVersion >= 120000
     self.isModern = apiVersion >= 100000
-    
+    self.isForever = apiVersion >= 16000 and apiVersion < 17000
+
     -- Chat API
     self.SendChatMessage = function(msg, channel)
-        SafeCall(SendChatMessage, msg, channel)
+        return SafeCall(SendChatMessage, msg, channel)
     end
-    
+
     -- Emote API (ready for C_Emote in Midnight)
     if C_Emote and C_Emote.DoEmote then
         self.DoEmote = function(emote)
@@ -33,7 +34,7 @@ function PapaGreetAPI:Initialize()
             SafeCall(DoEmote, emote)
         end
     end
-    
+
     -- Party API
     if C_PartyInfo and C_PartyInfo.LeaveParty then
         self.LeaveParty = function()
@@ -44,28 +45,23 @@ function PapaGreetAPI:Initialize()
             SafeCall(LeaveGroup)
         end
     end
-    
+
     -- Timer API (abstracted for Midnight compatibility)
     self.After = function(delay, func)
         local success, result = SafeCall(C_Timer.After, delay, func)
         return success and result
     end
-    
+
     self.NewTimer = function(delay, func)
         local success, result = SafeCall(C_Timer.NewTimer, delay, func)
         return success and result
     end
-    
+
     self.NewTicker = function(interval, func, numTicks)
         local success, result = SafeCall(C_Timer.NewTicker, interval, func, numTicks)
         return success and result
     end
-    
-    -- Spell API (abstracted for Midnight compatibility)
-    self.GetSpellTexture = function(spellId)
-        local success, result = SafeCall(C_Spell.GetSpellTexture, spellId)
-        return success and result
-    end
+
 end
 
 PapaGreetAPI:Initialize()
@@ -87,7 +83,7 @@ local print = print
 
 -- Constants
 local DEFAULT_PROFILE = "Default"
-local SPELL_ID = 226582
+local BUTTON_ICON = "Interface\\AddOns\\PapaGreet\\Media\\Greeting.tga"
 local BUTTON_SIZE = 40
 local BUTTON_STRATA = "HIGH"
 local BUTTON_ALPHA = 1
@@ -124,120 +120,273 @@ local function Initialize()
                     delayEmote = 3,
                     delayLeave = 8,
                     cooldown = 3,
+                    autoLeave = not (select(4, GetBuildInfo()) >= 16000 and select(4, GetBuildInfo()) < 17000),
+                    nearbyGreetings = {
+                        "Well met, traveler!", "Safe travels!",
+                        "Heading somewhere interesting?", "Need a hand out here?",
+                        "Good to see a friendly face.",
+                    },
+                    campGreetings = {
+                        "Mind if I join you by the fire?", "A fine place to rest. Well met!",
+                        "There's room by the fire if you'd like to sit.",
+                        "That fire is a welcome sight.",
+                        "Rest well before the road calls again.",
+                    },
+                    starterPoolsVersion = 1,
                 }
             },
             currentProfile = DEFAULT_PROFILE,
             buttonPosition = { point = "CENTER", x = 0, y = 0 }
         }
     end
+    PapaGreetSavedVariables.profiles = PapaGreetSavedVariables.profiles or {}
+    -- Retire only the untouched preset from the previous local build. A modified
+    -- Roleplay profile is user data and remains available as a custom profile.
+    local oldRoleplay = PapaGreetSavedVariables.profiles.Roleplay
+    local function SameMessages(actual, expected)
+        if type(actual) ~= "table" or #actual ~= #expected then return false end
+        for i, message in ipairs(expected) do
+            if actual[i] ~= message then return false end
+        end
+        return true
+    end
+    if oldRoleplay
+        and SameMessages(oldRoleplay.greetings, {
+            "Well met, travelers.", "Good to have company on the road.", "The road is kinder with friends."})
+        and SameMessages(oldRoleplay.goodbyes, {
+            "Safe travels. Keep your eyes on the road.", "Until our paths cross again.", "May your journey be a gentle one."})
+        and SameMessages(oldRoleplay.nearbyGreetings, {
+            "Well met. Heading this way too?", "Care to share the road a while?"})
+        and SameMessages(oldRoleplay.campGreetings, {
+            "Mind if I warm myself by the fire?", "A welcome sight after a long road."})
+        and SameMessages(oldRoleplay.greetingEmotes, {"wave", "bow", "nod"})
+        and SameMessages(oldRoleplay.goodbyeEmotes, {"wave", "bow"})
+        and oldRoleplay.delayEmote == 2 and oldRoleplay.delayLeave == 8
+        and oldRoleplay.cooldown == 3 and oldRoleplay.autoLeave == false then
+        PapaGreetSavedVariables.profiles.Roleplay = nil
+        if PapaGreetSavedVariables.currentProfile == "Roleplay" then
+            PapaGreetSavedVariables.currentProfile = DEFAULT_PROFILE
+        end
+    end
     -- Ensure buttonPosition exists for existing saves
     if not PapaGreetSavedVariables.buttonPosition then
         PapaGreetSavedVariables.buttonPosition = { point = "CENTER", x = 0, y = 0 }
     end
-    -- Ensure all profiles have cooldown field
+    -- Migrate existing profiles without replacing their messages or settings.
     for _, profile in pairs(PapaGreetSavedVariables.profiles) do
-        if profile.cooldown == nil then
-            profile.cooldown = 3
+        if profile.cooldown == nil then profile.cooldown = 3 end
+        if profile.autoLeave == nil then profile.autoLeave = not PapaGreetAPI.isForever end
+        if profile.nearbyGreetings == nil then
+            profile.nearbyGreetings = {"Well met, traveler!", "Safe travels!"}
+        end
+        if profile.campGreetings == nil then
+            profile.campGreetings = {"Mind if I join you by the fire?", "A fine place to rest. Well met!"}
+        end
+    end
+    -- Upgrade Default and profiles copied from its old two-line starter pools.
+    -- The marker prevents deleted lines from returning on later reloads.
+    local oldNearby = {"Well met, traveler!", "Safe travels!"}
+    local oldCamp = {"Mind if I join you by the fire?", "A fine place to rest. Well met!"}
+    local newNearby = {
+        "Heading somewhere interesting?", "Need a hand out here?",
+        "Good to see a friendly face.",
+    }
+    local newCamp = {
+        "There's room by the fire if you'd like to sit.",
+        "That fire is a welcome sight.",
+        "Rest well before the road calls again.",
+    }
+    local function AddMissing(pool, message)
+        for _, existing in ipairs(pool) do
+            if existing == message then return end
+        end
+        pool[#pool + 1] = message
+    end
+    for name, profile in pairs(PapaGreetSavedVariables.profiles) do
+        if not profile.starterPoolsVersion then
+            if name == DEFAULT_PROFILE or SameMessages(profile.nearbyGreetings, oldNearby) then
+                for _, message in ipairs(newNearby) do AddMissing(profile.nearbyGreetings, message) end
+            end
+            if name == DEFAULT_PROFILE or SameMessages(profile.campGreetings, oldCamp) then
+                for _, message in ipairs(newCamp) do AddMissing(profile.campGreetings, message) end
+            end
+            profile.starterPoolsVersion = 1
         end
     end
     return PapaGreetSavedVariables.currentProfile
 end
 
-local currentProfile = Initialize()
+Initialize()
 
 -- Helper functions
 local function GetProfile()
-    return PapaGreetSavedVariables.profiles[currentProfile]
+    local name = PapaGreetSavedVariables.currentProfile
+    local profile = PapaGreetSavedVariables.profiles[name]
+    if not profile then
+        PapaGreetSavedVariables.currentProfile = DEFAULT_PROFILE
+        profile = PapaGreetSavedVariables.profiles[DEFAULT_PROFILE]
+    end
+    return profile
 end
 
 local function DetermineChatChannel()
-    if IsInGroup() then
-        return IsInInstance() and "INSTANCE_CHAT" or "PARTY"
-    else
-        return "SAY"
+    if LE_PARTY_CATEGORY_INSTANCE and IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then
+        return "INSTANCE_CHAT"
     end
+    if IsInRaid and IsInRaid() then return "RAID" end
+    if IsInGroup() then return "PARTY" end
+    return "SAY"
 end
 
--- Combat-safe greeting queue system
+-- A group signature prevents a delayed farewell from leaving a different group.
+local function GroupSignature()
+    if not IsInGroup() then return nil end
+    local members = {}
+    local count = GetNumGroupMembers and GetNumGroupMembers() or 0
+    members[#members + 1] = UnitGUID("player") or "player"
+    local prefix = IsInRaid and IsInRaid() and "raid" or "party"
+    for i = 1, count do
+        local guid = UnitGUID(prefix .. i)
+        if guid then members[#members + 1] = guid end
+    end
+    table.sort(members)
+    return DetermineChatChannel() .. ":" .. count .. ":" .. table.concat(members, ",")
+end
+
 local greetingQueue = {}
+local pendingFarewell
+local leaveTimer
+local leaveCountdownTicker
+local leaveDeadline
+local papaGreetButton
 
-local function ProcessGreetingQueue()
-    if #greetingQueue > 0 then
-        for i, queuedGreeting in ipairs(greetingQueue) do
-            PapaGreetAPI.SendChatMessage(queuedGreeting.message, queuedGreeting.channel)
-            if queuedGreeting.emote then
-                PapaGreetAPI.After(queuedGreeting.delayEmote, function()
-                    PapaGreetAPI.DoEmote(queuedGreeting.emote)
-                end)
-            end
-            -- Call callback after emote delay if provided
-            if queuedGreeting.callback then
-                PapaGreetAPI.After(queuedGreeting.delayEmote + 0.5, queuedGreeting.callback)
-            end
-        end
-        wipe(greetingQueue)
-        UIErrorsFrame:AddMessage("Queued greetings sent!", 0.0, 1.0, 0.0)
+local function Notice(message, r, g, b)
+    if UIErrorsFrame then UIErrorsFrame:AddMessage(message, r or 1, g or 1, b or 1) end
+end
+
+local function StopLeaveCountdown()
+    if leaveCountdownTicker then leaveCountdownTicker:Cancel(); leaveCountdownTicker = nil end
+    leaveDeadline = nil
+    if papaGreetButton and papaGreetButton.countdownText then
+        papaGreetButton.countdownText:Hide()
     end
 end
 
--- Modern event system support (EventRegistry for retail 10+, fallback for older clients)
-if EventRegistry then
-    -- Use modern EventRegistry API
-    EventRegistry:RegisterCallback("PLAYER_REGEN_ENABLED", ProcessGreetingQueue)
-else
-    -- Fallback to traditional event system
-    local combatEventFrame = CreateFrame("Frame")
-    combatEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    combatEventFrame:SetScript("OnEvent", function(self, event)
-        if event == "PLAYER_REGEN_ENABLED" then
-            ProcessGreetingQueue()
+local function UpdateLeaveCountdown()
+    if not leaveDeadline or not papaGreetButton then return end
+    local remaining = math.max(0, math.ceil(leaveDeadline - GetTime()))
+    papaGreetButton.countdownText:SetText(remaining)
+    papaGreetButton.countdownText:SetShown(remaining > 0)
+end
+
+local function CancelLeave(silent)
+    local hadPending = pendingFarewell ~= nil
+    if pendingFarewell then pendingFarewell.cancelled = true; pendingFarewell = nil end
+    if leaveTimer then leaveTimer:Cancel(); leaveTimer = nil end
+    StopLeaveCountdown()
+    if not silent then
+        Notice(hadPending and "Pending farewell/leave canceled." or "No pending farewell/leave action.", 1, 1, 0)
+    end
+end
+
+local function StartLeaveTimer(action)
+    if pendingFarewell ~= action or action.cancelled then return end
+    if not action.group or GroupSignature() ~= action.group then
+        CancelLeave(true)
+        Notice("Group changed; automatic leave canceled.", 1, 0.5, 0)
+        return
+    end
+    local delay = math.max(0, tonumber(action.delayLeave) or 0)
+    leaveDeadline = GetTime() + delay
+    if delay > 0 then
+        UpdateLeaveCountdown()
+        leaveCountdownTicker = PapaGreetAPI.NewTicker(0.2, UpdateLeaveCountdown)
+    end
+    leaveTimer = PapaGreetAPI.NewTimer(delay, function()
+        if pendingFarewell ~= action or action.cancelled then return end
+        if GroupSignature() == action.group then
+            PapaGreetAPI.LeaveParty()
+        else
+            Notice("Group changed; automatic leave canceled.", 1, 0.5, 0)
         end
+        pendingFarewell = nil
+        leaveTimer = nil
+        StopLeaveCountdown()
     end)
+    if not leaveTimer then CancelLeave(true) end
 end
 
-local function SendMessageAndEmote(message, emote, delayEmote, callback)
-    local channel = DetermineChatChannel()
-    
-    -- Check if in combat
-    if InCombatLockdown() then
-        table.insert(greetingQueue, {
-            message = message,
-            channel = channel,
-            emote = emote,
-            delayEmote = delayEmote or 3,
-            callback = callback
-        })
-        UIErrorsFrame:AddMessage("Greeting queued (in combat)", 1.0, 1.0, 0.0)
-        return true -- Queued
+local function SendAction(action)
+    if action.cancelled then return end
+    if action.group and GroupSignature() ~= action.group then
+        if pendingFarewell == action then CancelLeave(true) end
+        Notice("Group changed; queued message canceled.", 1, 0.5, 0)
+        return
     end
-    
-    -- Send immediately if not in combat
-    if message then
-        PapaGreetAPI.SendChatMessage(message, channel)
+    local channel = action.channel or DetermineChatChannel()
+    if not PapaGreetAPI.SendChatMessage(action.message, channel) then
+        if pendingFarewell == action then CancelLeave(true) end
+        return
     end
-    if emote then
-        PapaGreetAPI.After(delayEmote, function()
-            PapaGreetAPI.DoEmote(emote)
+    if action.emote then
+        PapaGreetAPI.After(action.delayEmote, function()
+            if not action.cancelled then PapaGreetAPI.DoEmote(action.emote) end
         end)
     end
-    
-    -- Call callback after emote delay if provided
-    if callback then
-        PapaGreetAPI.After(delayEmote + 0.5, callback)
+    if action.leave then
+        PapaGreetAPI.After(action.delayEmote + 0.5, function()
+            StartLeaveTimer(action)
+        end)
+    elseif pendingFarewell == action then
+        pendingFarewell = nil
     end
-    
-    return false -- Sent immediately
 end
 
-local leaveTimer
-local leaveTimerActive = false
-local leaveCountdownTicker
-local leaveTimeRemaining = 0
-local papaGreetButton -- Forward declaration
+local function QueueOrSend(action)
+    if InCombatLockdown() then
+        greetingQueue[#greetingQueue + 1] = action
+        Notice("Message queued until combat ends.", 1, 1, 0)
+    else
+        SendAction(action)
+    end
+end
+
+local combatEventFrame = CreateFrame("Frame")
+combatEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+combatEventFrame:SetScript("OnEvent", function()
+    local queued = greetingQueue
+    greetingQueue = {}
+    for _, action in ipairs(queued) do SendAction(action) end
+end)
+
+local lastSelection = {}
+local function PickMessage(pool, key)
+    if not pool or #pool == 0 then return nil end
+    local previous = lastSelection[key]
+    local choices = {}
+    for _, message in ipairs(pool) do
+        if message ~= previous then choices[#choices + 1] = message end
+    end
+    if #choices == 0 then choices = pool end
+    local selected = choices[math_random(#choices)]
+    lastSelection[key] = selected
+    return selected
+end
+
+local function MakeAction(message, emote, delay, channel, leave)
+    return {
+        message = message,
+        emote = emote,
+        delayEmote = math.max(0, tonumber(delay) or 0),
+        channel = channel,
+        leave = leave,
+        group = channel == "SAY" and nil or GroupSignature(),
+    }
+end
 
 -- Cooldown system
-local lastGreetingTime = 0
-local lastGoodbyeTime = 0
+local lastGreetingTime = -math.huge
+local lastGoodbyeTime = -math.huge
 
 local function IsOnCooldown(lastTime, cooldown)
     return (GetTime() - lastTime) < cooldown
@@ -250,20 +399,20 @@ end
 
 local function UpdateCooldownDisplay()
     if not papaGreetButton or not papaGreetButton.cooldown then return end
-    
+
     local profile = GetProfile()
     local cooldown = profile.cooldown or 0
-    
+
     if cooldown == 0 then
         papaGreetButton.cooldown:Hide()
         return
     end
-    
+
     -- Check both greeting and goodbye cooldowns
     local greetCd = GetCooldownRemaining(lastGreetingTime, cooldown)
     local goodbyeCd = GetCooldownRemaining(lastGoodbyeTime, cooldown)
     local maxCd = math.max(greetCd, goodbyeCd)
-    
+
     if maxCd > 0 then
         papaGreetButton.cooldown:SetCooldown(GetTime() - (cooldown - maxCd), cooldown)
         papaGreetButton.cooldown:Show()
@@ -272,163 +421,71 @@ local function UpdateCooldownDisplay()
     end
 end
 
-local function HandleGreeting()
+local function HandleGreeting(kind)
     local profile = GetProfile()
-    
-    -- Check cooldown
+    local poolKey = kind == "camp" and "campGreetings" or kind == "nearby" and "nearbyGreetings" or "greetings"
+    local pool = profile[poolKey]
     local cooldown = profile.cooldown or 0
     if cooldown > 0 and IsOnCooldown(lastGreetingTime, cooldown) then
-        local remaining = GetCooldownRemaining(lastGreetingTime, cooldown)
-        UIErrorsFrame:AddMessage(string.format("Greeting on cooldown (%.1fs remaining)", remaining), 1.0, 0.5, 0.0)
-        -- Shake animation
-        if papaGreetButton then
-            papaGreetButton:SetPoint(papaGreetButton:GetPoint())
-            papaGreetButton:StartMoving()
-            papaGreetButton:StopMovingOrSizing()
-        end
+        Notice(string.format("Greeting on cooldown (%.1fs remaining)", GetCooldownRemaining(lastGreetingTime, cooldown)), 1, 0.5, 0)
         return
     end
-    
-    if not profile.greetings or #profile.greetings == 0 then
-        UIErrorsFrame:AddMessage("No greetings configured. Use /papa menu to add some.", 1.0, 0.0, 0.0)
+    local greeting = PickMessage(pool, PapaGreetSavedVariables.currentProfile .. ":" .. poolKey)
+    if not greeting then
+        Notice("No greetings configured for this action. Use /papa menu.", 1, 0, 0)
         return
     end
-    
-    local greeting = profile.greetings[math_random(#profile.greetings)]
-    local emote = (#profile.greetingEmotes > 0) and profile.greetingEmotes[math_random(#profile.greetingEmotes)] or nil
-    SendMessageAndEmote(greeting, emote, profile.delayEmote)
-    
-    -- Set cooldown
+    local emote = PickMessage(profile.greetingEmotes, PapaGreetSavedVariables.currentProfile .. ":greetingEmotes")
+    local channel = kind and "SAY" or DetermineChatChannel()
+    QueueOrSend(MakeAction(greeting, emote, profile.delayEmote, channel, false))
     lastGreetingTime = GetTime()
     UpdateCooldownDisplay()
 end
 
-local function UpdateLeaveCountdown()
-    if not papaGreetButton or not papaGreetButton.countdownText then return end
-    
-    if leaveTimeRemaining > 0 then
-        papaGreetButton.countdownText:SetText(leaveTimeRemaining)
-        papaGreetButton.countdownText:Show()
-        -- Pulse animation
-        local scale = 1.0 + (0.2 * math.sin(GetTime() * 5))
-        papaGreetButton.countdownText:SetScale(scale)
-    else
-        papaGreetButton.countdownText:Hide()
-    end
-end
-
-local function StopLeaveCountdown()
-    if leaveCountdownTicker then
-        leaveCountdownTicker:Cancel()
-        leaveCountdownTicker = nil
-    end
-    leaveTimeRemaining = 0
-    if papaGreetButton and papaGreetButton.countdownText then
-        papaGreetButton.countdownText:Hide()
-    end
-end
-
-local function StartLeaveTimer()
+local function HandleGoodbye(forceLeave)
     local profile = GetProfile()
-    
-    -- Start the leave timer with visual countdown
-    leaveTimerActive = true
-    leaveTimeRemaining = profile.delayLeave
-    
-    -- Update countdown every second
-    leaveCountdownTicker = PapaGreetAPI.NewTicker(1, function()
-        leaveTimeRemaining = leaveTimeRemaining - 1
-        UpdateLeaveCountdown()
-        
-        if leaveTimeRemaining <= 0 then
-            StopLeaveCountdown()
-        end
-    end, profile.delayLeave)
-    
-    -- Initial display
-    UpdateLeaveCountdown()
-    
-    -- Final action timer
-    leaveTimer = PapaGreetAPI.NewTimer(profile.delayLeave, function()
-        if leaveTimerActive then
-            if IsInGroup() then
-                PapaGreetAPI.LeaveParty()
-                UIErrorsFrame:AddMessage("You have left the group.", 1.0, 1.0, 0.0)
-            else
-                UIErrorsFrame:AddMessage("You are not in a group.", 1.0, 1.0, 0.0)
-            end
-            leaveTimerActive = false
-            leaveTimer = nil
-            StopLeaveCountdown()
-        end
-    end)
-end
-
-local function HandleGoodbye()
-    local profile = GetProfile()
-    
-    -- Check cooldown
     local cooldown = profile.cooldown or 0
     if cooldown > 0 and IsOnCooldown(lastGoodbyeTime, cooldown) then
-        local remaining = GetCooldownRemaining(lastGoodbyeTime, cooldown)
-        UIErrorsFrame:AddMessage(string.format("Goodbye on cooldown (%.1fs remaining)", remaining), 1.0, 0.5, 0.0)
-        -- Shake animation
-        if papaGreetButton then
-            papaGreetButton:SetPoint(papaGreetButton:GetPoint())
-            papaGreetButton:StartMoving()
-            papaGreetButton:StopMovingOrSizing()
-        end
+        Notice(string.format("Goodbye on cooldown (%.1fs remaining)", GetCooldownRemaining(lastGoodbyeTime, cooldown)), 1, 0.5, 0)
         return
     end
-    
-    if not profile.goodbyes or #profile.goodbyes == 0 then
-        UIErrorsFrame:AddMessage("No goodbyes configured. Use /papa menu to add some.", 1.0, 0.0, 0.0)
+    local goodbye = PickMessage(profile.goodbyes, PapaGreetSavedVariables.currentProfile .. ":goodbyes")
+    if not goodbye then
+        Notice("No goodbyes configured. Use /papa menu.", 1, 0, 0)
         return
     end
-    
-    -- Set cooldown
+    local leave = forceLeave
+    if leave == nil then leave = profile.autoLeave end
+    CancelLeave(true)
+    local channel = DetermineChatChannel()
+    local emote = PickMessage(profile.goodbyeEmotes, PapaGreetSavedVariables.currentProfile .. ":goodbyeEmotes")
+    local action = MakeAction(goodbye, emote, profile.delayEmote, channel, leave)
+    action.delayLeave = profile.delayLeave
+    if leave and action.group then pendingFarewell = action end
+    QueueOrSend(action)
     lastGoodbyeTime = GetTime()
     UpdateCooldownDisplay()
-    
-    local goodbye = profile.goodbyes[math_random(#profile.goodbyes)]
-    local emote = (#profile.goodbyeEmotes > 0) and profile.goodbyeEmotes[math_random(#profile.goodbyeEmotes)] or nil
-    
-    -- Send message/emote with callback to start leave timer
-    -- This ensures leave timer only starts after message is actually sent (even if queued during combat)
-    local wasQueued = SendMessageAndEmote(goodbye, emote, profile.delayEmote, StartLeaveTimer)
-    
-    if wasQueued then
-        UIErrorsFrame:AddMessage("Goodbye queued (in combat). Will leave after combat.", 1.0, 1.0, 0.0)
-    end
-end
-
-local function CancelLeave()
-    if leaveTimerActive and leaveTimer then
-        leaveTimerActive = false
-        leaveTimer:Cancel()
-        leaveTimer = nil
-        StopLeaveCountdown()
-        UIErrorsFrame:AddMessage("Leave group action has been canceled.", 1.0, 1.0, 0.0)
-    else
-        UIErrorsFrame:AddMessage("No active leave action to cancel.", 1.0, 1.0, 0.0)
-    end
 end
 
 local function OnButtonClick(self, button)
     if button == "LeftButton" then
         if IsShiftKeyDown() then
-            ToggleLFDParentFrame()
+            if ToggleLFDParentFrame then ToggleLFDParentFrame() end
         elseif IsControlKeyDown() then
             TogglePapaGreetMenu()
+        elseif IsAltKeyDown and IsAltKeyDown() then
+            HandleGreeting("nearby")
         else
             HandleGreeting()
         end
     elseif button == "RightButton" then
         if IsShiftKeyDown() then
-            TogglePVPUI()
+            if TogglePVPUI then TogglePVPUI() end
         elseif IsControlKeyDown() then
             -- Cancel leave if Control + Right Click
             CancelLeave()
+        elseif IsAltKeyDown and IsAltKeyDown() then
+            HandleGreeting("camp")
         else
             HandleGoodbye()
         end
@@ -440,11 +497,9 @@ local function CreatePapaGreetButton()
     local button = CreateFrame("Button", "PapaGreetButton", UIParent, "UIPanelButtonTemplate")
     button:SetSize(BUTTON_SIZE, BUTTON_SIZE)
 
-    local spellTexture = PapaGreetAPI.GetSpellTexture(SPELL_ID)
-    local texture = spellTexture or "Interface\\Icons\\INV_Misc_QuestionMark"
-    button:SetNormalTexture(texture)
-    button:SetPushedTexture(texture)
-    button:SetDisabledTexture(texture)
+    button:SetNormalTexture(BUTTON_ICON)
+    button:SetPushedTexture(BUTTON_ICON)
+    button:SetDisabledTexture(BUTTON_ICON)
 
     -- Restore saved position
     local pos = PapaGreetSavedVariables.buttonPosition
@@ -462,15 +517,17 @@ local function CreatePapaGreetButton()
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine("PapaGreet", 1, 1, 1)
         GameTooltip:AddLine("Left Click: Greet", 0.5, 1, 0.5)
-        GameTooltip:AddLine("Right Click: Goodbye & Leave", 1, 0.5, 0.5)
+        GameTooltip:AddLine(GetProfile().autoLeave and "Right Click: Goodbye & Leave" or "Right Click: Goodbye", 1, 0.5, 0.5)
+        GameTooltip:AddLine("Alt+Left: Nearby Greeting", 0.5, 1, 0.5)
+        GameTooltip:AddLine("Alt+Right: Campsite Greeting", 1, 0.8, 0.5)
         GameTooltip:AddLine("Ctrl+Left: Settings", 0.5, 0.5, 1)
-        GameTooltip:AddLine("Ctrl+Right: Cancel Leave", 1, 1, 0)
+        GameTooltip:AddLine("Ctrl+Right: Cancel Pending Leave", 1, 1, 0)
         GameTooltip:AddLine("Shift+Left: LFD", 0.8, 0.8, 0.8)
         GameTooltip:AddLine("Shift+Right: PVP", 0.8, 0.8, 0.8)
         GameTooltip:AddLine("Middle Drag: Move", 0.7, 0.7, 0.7)
         GameTooltip:Show()
     end)
-    
+
     button:SetScript("OnLeave", function(self)
         GameTooltip:Hide()
     end)
@@ -514,7 +571,10 @@ papaGreetButton = CreatePapaGreetButton()
 -- Keybindings
 BINDING_HEADER_PAPAGREET = "PapaGreet"
 BINDING_NAME_PAPAGREET_GREET = "Send Greeting"
-BINDING_NAME_PAPAGREET_GOODBYE = "Send Goodbye & Leave"
+BINDING_NAME_PAPAGREET_GOODBYE = "Send Goodbye"
+BINDING_NAME_PAPAGREET_LEAVE = "Send Goodbye & Leave"
+BINDING_NAME_PAPAGREET_NEARBY = "Nearby Greeting"
+BINDING_NAME_PAPAGREET_CAMP = "Campsite Greeting"
 BINDING_NAME_PAPAGREET_CANCEL = "Cancel Leave"
 BINDING_NAME_PAPAGREET_MENU = "Toggle Menu"
 
@@ -524,6 +584,18 @@ end
 
 function PapaGreet_SendGoodbye()
     HandleGoodbye()
+end
+
+function PapaGreet_SendGoodbyeAndLeave()
+    HandleGoodbye(true)
+end
+
+function PapaGreet_SendNearbyGreeting()
+    HandleGreeting("nearby")
+end
+
+function PapaGreet_SendCampGreeting()
+    HandleGreeting("camp")
 end
 
 function PapaGreet_CancelLeave()
@@ -539,11 +611,15 @@ SLASH_PAPA1 = SLASH_PAPA1 or '/papa'
 
 SlashCmdList["PAPA"] = function(cmd)
     local command, arg = cmd:match("^(%S*)%s*(.-)$")
-    
+
     if not command or command == "" then
         print("|cff00ff00PapaGreet Commands:|r")
         print("  |cffffd700/papa greet|r - Send greeting")
-        print("  |cffffd700/papa bye|r - Send goodbye & leave")
+        print("  |cffffd700/papa bye|r - Send goodbye (uses profile leave setting)")
+        print("  |cffffd700/papa byeonly|r - Send goodbye without leaving")
+        print("  |cffffd700/papa leave|r - Send goodbye and leave")
+        print("  |cffffd700/papa nearby|r - Greet nearby players in SAY")
+        print("  |cffffd700/papa camp|r - Campsite greeting in SAY")
         print("  |cffffd700/papa cancel|r - Cancel leave timer")
         print("  |cffffd700/papa menu|r - Toggle settings menu")
         print("  |cffffd700/papa hide|r - Hide button")
@@ -558,6 +634,14 @@ SlashCmdList["PAPA"] = function(cmd)
         HandleGreeting()
     elseif command == "bye" or command == "goodbye" then
         HandleGoodbye()
+    elseif command == "byeonly" then
+        HandleGoodbye(false)
+    elseif command == "leave" then
+        HandleGoodbye(true)
+    elseif command == "nearby" then
+        HandleGreeting("nearby")
+    elseif command == "camp" then
+        HandleGreeting("camp")
     elseif command == "cancel" then
         CancelLeave()
     elseif command == "menu" then
@@ -587,7 +671,7 @@ SlashCmdList["PAPA"] = function(cmd)
             print("Usage: /papa cd [seconds] (0 to disable)")
         end
     elseif command == "version" or command == "v" then
-        print("|cff00ff00PapaGreet|r version |cffffd7001.3.0|r")
+        print("|cff00ff00PapaGreet|r version |cffffd7001.4.0|r")
     else
         print("|cffff0000Unknown command:|r " .. command)
         print("Type |cffffd700/papa|r for help.")
