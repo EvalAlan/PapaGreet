@@ -52,14 +52,44 @@ local function InitializeVariables()
     PapaGreetSavedVariables = PapaGreetSavedVariables or {}
     PapaGreetSavedVariables.profiles = PapaGreetSavedVariables.profiles or {}
     PapaGreetSavedVariables.profiles[DEFAULT_PROFILE] = PapaGreetSavedVariables.profiles[DEFAULT_PROFILE] or {
-        greetings = {},
-        goodbyes = {},
+        greetings = {
+            "Hail, champions!", "Greetings, heroes!", "Greetings!",
+            "Salutations, adventurers!", "Well met!", "Good evening!",
+        },
+        goodbyes = {
+            "Farewell, champions. May your blade be sharp and your armor strong.",
+            "Until we meet again, heroes.", "Safe travels, adventurers.",
+            "Until next time champions!", "It was good traveling with you. Farewell!",
+        },
+        soloGoodbyes = {
+            "Until next time!", "Time to hit the road. Safe travels!",
+            "Farewell for now!", "The road calls. See you around!",
+            "Take care out there!",
+        },
         greetingEmotes = {},
         goodbyeEmotes = {},
         delayEmote = 3,
         delayLeave = 8,
-        nearbyGreetings = {"Well met, traveler!", "Safe travels!"},
-        campGreetings = {"Mind if I join you by the fire?", "A fine place to rest. Well met!"},
+        nearbyGreetings = {
+            "Well met, traveler!", "Safe travels!", "Heading somewhere interesting?",
+            "Need a hand out here?", "Good to see a friendly face.",
+        },
+        campGreetings = {
+            "Mind if I join you by the fire?", "A fine place to rest. Well met!",
+            "There's room by the fire if you'd like to sit.",
+            "That fire is a welcome sight.", "Rest well before the road calls again.",
+        },
+        campGoodbyes = {
+            "Thanks for the warmth. Safe travels!", "The fire was welcome. Until next time!",
+            "I should be on my way. Farewell!", "May your fire burn bright. Goodbye!",
+            "The road awaits. Thank you for the company!",
+        },
+        thanksMessages = {
+            "Much appreciated. I owe you one.", "Thank you for the help.",
+            "That was kind of you. Thank you.", "I won't forget that. Thanks.",
+            "Your help made a difference. Thank you.",
+        },
+        actionPoolsVersion = 1,
     }
     PapaGreetSavedVariables.currentProfile = PapaGreetSavedVariables.currentProfile or DEFAULT_PROFILE
 
@@ -67,14 +97,32 @@ local function InitializeVariables()
     for name, profile in pairs(PapaGreetSavedVariables.profiles) do
         profile.greetings = profile.greetings or {}
         profile.goodbyes = profile.goodbyes or {}
+        profile.soloGoodbyes = profile.soloGoodbyes or {
+            "Until next time!", "Time to hit the road. Safe travels!",
+            "Farewell for now!", "The road calls. See you around!",
+            "Take care out there!",
+        }
         profile.greetingEmotes = profile.greetingEmotes or {}
         profile.goodbyeEmotes = profile.goodbyeEmotes or {}
-        profile.delayEmote = profile.delayEmote or 3
-        profile.delayLeave = profile.delayLeave or 8
+        if profile.delayEmote == nil then profile.delayEmote = 3 end
+        if profile.delayLeave == nil then profile.delayLeave = 8 end
         if profile.cooldown == nil then profile.cooldown = 3 end
         profile.nearbyGreetings = profile.nearbyGreetings or {"Well met, traveler!", "Safe travels!"}
         profile.campGreetings = profile.campGreetings or {"Mind if I join you by the fire?", "A fine place to rest. Well met!"}
+        profile.campGoodbyes = profile.campGoodbyes or {
+            "Thanks for the warmth. Safe travels!", "The fire was welcome. Until next time!",
+            "I should be on my way. Farewell!", "May your fire burn bright. Goodbye!",
+            "The road awaits. Thank you for the company!",
+        }
+        profile.thanksMessages = profile.thanksMessages or {
+            "Much appreciated. I owe you one.", "Thank you for the help.",
+            "That was kind of you. Thank you.", "I won't forget that. Thanks.",
+            "Your help made a difference. Thank you.",
+        }
         if profile.autoLeave == nil then profile.autoLeave = not (select(4, GetBuildInfo()) >= 16000 and select(4, GetBuildInfo()) < 17000) end
+    end
+    if not PapaGreetSavedVariables.profiles[PapaGreetSavedVariables.currentProfile] then
+        PapaGreetSavedVariables.currentProfile = DEFAULT_PROFILE
     end
 end
 
@@ -86,17 +134,17 @@ local function RefreshPapaGreetMenu()
     currentProfile = PapaGreetSavedVariables.currentProfile
     local emoteDelayEditBox = _G["PapaGreetDelayEditBox"]
     if emoteDelayEditBox then
-        emoteDelayEditBox:SetText(math_floor(PapaGreetSavedVariables.profiles[currentProfile].delayEmote or 3))
+        emoteDelayEditBox:SetText(math_floor(PapaGreetSavedVariables.profiles[currentProfile].delayEmote))
     end
 
     local leaveDelayEditBox = _G["PapaGreetLeaveDelayEditBox"]
     if leaveDelayEditBox then
-        leaveDelayEditBox:SetText(math_floor(PapaGreetSavedVariables.profiles[currentProfile].delayLeave or 8))
+        leaveDelayEditBox:SetText(math_floor(PapaGreetSavedVariables.profiles[currentProfile].delayLeave))
     end
 
     local cooldownEditBox = _G["PapaGreetCooldownEditBox"]
     if cooldownEditBox then
-        cooldownEditBox:SetText(math_floor(PapaGreetSavedVariables.profiles[currentProfile].cooldown or 3))
+        cooldownEditBox:SetText(math_floor(PapaGreetSavedVariables.profiles[currentProfile].cooldown))
     end
 
     UIDropDownMenu_SetSelectedValue(PapaGreetProfileDropdown, currentProfile)
@@ -122,12 +170,15 @@ local function createManageDropdown(name, parent, point, offsetX, offsetY, width
     dropdown:SetPoint(point, parent, point, offsetX - 15, offsetY)
     dropdown:SetSize(width, 25)
 
-    UIDropDownMenu_Initialize(dropdown, function(self, level, menuList)
+    -- Assigning initialize avoids an immediate callback while the menu is
+    -- still being built; WoW invokes it when the dropdown is opened.
+    dropdown.initialize = function(self, level, menuList)
         if level == 2 then
             if not menuList then return end
             local data = menuList
-            local items = PapaGreetSavedVariables.profiles[data.profile][data.key]
-            if items[data.index] ~= data.original then return end
+            local profile = PapaGreetSavedVariables.profiles[data.profile]
+            local items = profile and profile[data.key]
+            if not items or items[data.index] ~= data.original then return end
             local editInfo = UIDropDownMenu_CreateInfo()
             editInfo.text = "Edit"
             editInfo.notCheckable = true
@@ -149,7 +200,8 @@ local function createManageDropdown(name, parent, point, offsetX, offsetY, width
             UIDropDownMenu_AddButton(deleteInfo, level)
             return
         end
-        local items = PapaGreetSavedVariables.profiles[currentProfile][itemsKey]
+        local profile = PapaGreetSavedVariables.profiles[currentProfile]
+        local items = (profile and profile[itemsKey]) or {}
         if #items == 0 then
             local info = UIDropDownMenu_CreateInfo()
             info.text = "No entries"
@@ -165,7 +217,7 @@ local function createManageDropdown(name, parent, point, offsetX, offsetY, width
             info.menuList = {profile = currentProfile, key = itemsKey, index = i, original = item}
             UIDropDownMenu_AddButton(info, level)
         end
-    end)
+    end
     UIDropDownMenu_SetText(dropdown, "Edit / Delete...")
     return dropdown
 end
@@ -433,9 +485,9 @@ StaticPopupDialogs["PAPA_GREET_ADD_GOODBYE_EMOTE"] = {
     end
 }
 
-local function AddContextGreetingPopup(key, label)
+local function AddContextGreetingPopup(key, label, noun)
     return {
-        text = "Enter the " .. label .. " greeting:",
+        text = "Enter the " .. label .. " " .. (noun or "greeting") .. ":",
         button1 = "Add", button2 = "Cancel", hasEditBox = true,
         timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
         OnShow = function(self)
@@ -458,6 +510,9 @@ end
 
 StaticPopupDialogs["PAPA_GREET_ADD_NEARBY"] = AddContextGreetingPopup("nearbyGreetings", "nearby")
 StaticPopupDialogs["PAPA_GREET_ADD_CAMP"] = AddContextGreetingPopup("campGreetings", "campsite")
+StaticPopupDialogs["PAPA_GREET_ADD_SOLO_GOODBYE"] = AddContextGreetingPopup("soloGoodbyes", "solo", "goodbye")
+StaticPopupDialogs["PAPA_GREET_ADD_CAMP_GOODBYE"] = AddContextGreetingPopup("campGoodbyes", "campsite", "goodbye")
+StaticPopupDialogs["PAPA_GREET_ADD_THANKS"] = AddContextGreetingPopup("thanksMessages", "thank-you", "message")
 
 StaticPopupDialogs["PAPA_GREET_EDIT_ITEM"] = {
     text = "Edit this entry:",
@@ -500,6 +555,8 @@ StaticPopupDialogs["PAPA_GREET_EDIT_ITEM"] = {
 
 -- Show the menu
 function ShowPapaGreetMenu()
+    InitializeVariables()
+    currentProfile = PapaGreetSavedVariables.currentProfile
     -- Reuse existing frame if it exists
     if PapaGreetMenu then
         PapaGreetMenu:Show()
@@ -508,7 +565,7 @@ function ShowPapaGreetMenu()
     end
 
     local menu = CreateFrame("Frame", "PapaGreetMenu", UIParent, "BasicFrameTemplate")
-    menu:SetSize(380, 555)
+    menu:SetSize(380, 550)
     menu:SetPoint("CENTER")
     menu:SetFrameStrata("DIALOG")
     menu:SetMovable(true)
@@ -564,7 +621,8 @@ function ShowPapaGreetMenu()
         editBox:SetNumeric(true)
         editBox:SetMaxLetters(2)
         editBox:SetAutoFocus(false)
-        editBox:SetText(math_floor(PapaGreetSavedVariables.profiles[currentProfile][configKey] or defaultValue))
+        local value = PapaGreetSavedVariables.profiles[currentProfile][configKey]
+        editBox:SetText(math_floor(value == nil and defaultValue or value))
 
         editBox:SetScript("OnEnterPressed", function(self)
             local inputValue = tonumber(self:GetText())
@@ -583,30 +641,52 @@ function ShowPapaGreetMenu()
     createDelay("Leave Delay (seconds):", "PapaGreetLeaveDelayEditBox", -160, "delayLeave", 8)
     createDelay("Cooldown (seconds, 0=off):", "PapaGreetCooldownEditBox", -200, "cooldown", 3)
 
-    -- Create Add Greeting Button and Greeting Management Dropdown
-    createButton("PapaGreetAddGreetingButton", menu, "TOPLEFT", 20, -240, 140, 27, "Add Greeting", "PAPA_GREET_ADD_GREETING")
-    createManageDropdown("PapaGreetDeleteGreetingDropdown", menu, "TOPLEFT", 180, -240, 140, "greetings")
+    -- Keep both sets of message controls within the visible menu height.
+    local messageTab = CreateFrame("Button", "PapaGreetMessagesTab", menu, "UIPanelButtonTemplate")
+    messageTab:SetPoint("TOPLEFT", menu, "TOPLEFT", 20, -230)
+    messageTab:SetSize(150, 25)
+    local rpTab = CreateFrame("Button", "PapaGreetRPTab", menu, "UIPanelButtonTemplate")
+    rpTab:SetPoint("TOPLEFT", menu, "TOPLEFT", 180, -230)
+    rpTab:SetSize(150, 25)
 
-    -- Create Add Goodbye Button and Goodbye Management Dropdown
-    createButton("PapaGreetAddGoodbyeButton", menu, "TOPLEFT", 20, -280, 140, 27, "Add Goodbye", "PAPA_GREET_ADD_GOODBYE")
-    createManageDropdown("PapaGreetDeleteGoodbyeDropdown", menu, "TOPLEFT", 180, -280, 140, "goodbyes")
+    local messagePanel = CreateFrame("Frame", "PapaGreetMessagePanel", menu)
+    messagePanel:SetPoint("TOPLEFT", menu, "TOPLEFT", 0, -265)
+    messagePanel:SetSize(350, 205)
+    local rpPanel = CreateFrame("Frame", "PapaGreetRPPanel", menu)
+    rpPanel:SetPoint("TOPLEFT", menu, "TOPLEFT", 0, -265)
+    rpPanel:SetSize(350, 205)
 
-    -- Create Add Greeting Emote Button and Greeting Emote Management Dropdown
-    createButton("PapaGreetAddGreetingEmoteButton", menu, "TOPLEFT", 20, -320, 140, 27, "Add Greeting Emote", "PAPA_GREET_ADD_GREETING_EMOTE")
-    createManageDropdown("PapaGreetDeleteGreetingEmoteDropdown", menu, "TOPLEFT", 180, -320, 140, "greetingEmotes")
+    local function ShowSection(section)
+        messagePanel:SetShown(section == "messages")
+        rpPanel:SetShown(section == "rp")
+        messageTab:SetText(section == "messages" and "[Messages]" or "Messages")
+        rpTab:SetText(section == "rp" and "[RP / Camp]" or "RP / Camp")
+    end
+    messageTab:SetScript("OnClick", function() ShowSection("messages") end)
+    rpTab:SetScript("OnClick", function() ShowSection("rp") end)
+    ShowSection("messages")
 
-    -- Create Add Goodbye Emote Button and Goodbye Emote Management Dropdown
-    createButton("PapaGreetAddGoodbyeEmoteButton", menu, "TOPLEFT", 20, -360, 140, 27, "Add Goodbye Emote", "PAPA_GREET_ADD_GOODBYE_EMOTE")
-    createManageDropdown("PapaGreetDeleteGoodbyeEmoteDropdown", menu, "TOPLEFT", 180, -360, 140, "goodbyeEmotes")
+    createButton("PapaGreetAddGreetingButton", messagePanel, "TOPLEFT", 20, -10, 140, 27, "Add Greeting", "PAPA_GREET_ADD_GREETING")
+    createManageDropdown("PapaGreetDeleteGreetingDropdown", messagePanel, "TOPLEFT", 180, -10, 140, "greetings")
+    createButton("PapaGreetAddGoodbyeButton", messagePanel, "TOPLEFT", 20, -50, 140, 27, "Add Group Goodbye", "PAPA_GREET_ADD_GOODBYE")
+    createManageDropdown("PapaGreetDeleteGoodbyeDropdown", messagePanel, "TOPLEFT", 180, -50, 140, "goodbyes")
+    createButton("PapaGreetAddSoloGoodbyeButton", messagePanel, "TOPLEFT", 20, -90, 140, 27, "Add Solo Goodbye", "PAPA_GREET_ADD_SOLO_GOODBYE")
+    createManageDropdown("PapaGreetDeleteSoloGoodbyeDropdown", messagePanel, "TOPLEFT", 180, -90, 140, "soloGoodbyes")
+    createButton("PapaGreetAddGreetingEmoteButton", messagePanel, "TOPLEFT", 20, -130, 140, 27, "Add Greeting Emote", "PAPA_GREET_ADD_GREETING_EMOTE")
+    createManageDropdown("PapaGreetDeleteGreetingEmoteDropdown", messagePanel, "TOPLEFT", 180, -130, 140, "greetingEmotes")
+    createButton("PapaGreetAddGoodbyeEmoteButton", messagePanel, "TOPLEFT", 20, -170, 140, 27, "Add Goodbye Emote", "PAPA_GREET_ADD_GOODBYE_EMOTE")
+    createManageDropdown("PapaGreetDeleteGoodbyeEmoteDropdown", messagePanel, "TOPLEFT", 180, -170, 140, "goodbyeEmotes")
 
-    -- Nearby and campsite greetings are deliberate SAY actions.
-    createButton("PapaGreetAddNearbyButton", menu, "TOPLEFT", 20, -400, 140, 27, "Add Nearby", "PAPA_GREET_ADD_NEARBY")
-    createManageDropdown("PapaGreetDeleteNearbyDropdown", menu, "TOPLEFT", 180, -400, 140, "nearbyGreetings")
-    createButton("PapaGreetAddCampButton", menu, "TOPLEFT", 20, -440, 140, 27, "Add Campsite", "PAPA_GREET_ADD_CAMP")
-    createManageDropdown("PapaGreetDeleteCampDropdown", menu, "TOPLEFT", 180, -440, 140, "campGreetings")
-
+    createButton("PapaGreetAddNearbyButton", rpPanel, "TOPLEFT", 20, -10, 140, 27, "Add Nearby Greeting", "PAPA_GREET_ADD_NEARBY")
+    createManageDropdown("PapaGreetDeleteNearbyDropdown", rpPanel, "TOPLEFT", 180, -10, 140, "nearbyGreetings")
+    createButton("PapaGreetAddCampButton", rpPanel, "TOPLEFT", 20, -50, 140, 27, "Add Camp Greeting", "PAPA_GREET_ADD_CAMP")
+    createManageDropdown("PapaGreetDeleteCampDropdown", rpPanel, "TOPLEFT", 180, -50, 140, "campGreetings")
+    createButton("PapaGreetAddCampGoodbyeButton", rpPanel, "TOPLEFT", 20, -90, 140, 27, "Add Camp Goodbye", "PAPA_GREET_ADD_CAMP_GOODBYE")
+    createManageDropdown("PapaGreetDeleteCampGoodbyeDropdown", rpPanel, "TOPLEFT", 180, -90, 140, "campGoodbyes")
+    createButton("PapaGreetAddThanksButton", rpPanel, "TOPLEFT", 20, -130, 140, 27, "Add Thank You", "PAPA_GREET_ADD_THANKS")
+    createManageDropdown("PapaGreetDeleteThanksDropdown", rpPanel, "TOPLEFT", 180, -130, 140, "thanksMessages")
     local autoLeave = CreateFrame("CheckButton", "PapaGreetAutoLeaveCheck", menu, "UICheckButtonTemplate")
-    autoLeave:SetPoint("TOPLEFT", menu, "TOPLEFT", 20, -480)
+    autoLeave:SetPoint("TOPLEFT", menu, "TOPLEFT", 20, -490)
     _G[autoLeave:GetName() .. "Text"]:SetText("Leave group after goodbye")
     autoLeave:SetScript("OnClick", function(self)
         PapaGreetSavedVariables.profiles[currentProfile].autoLeave = self:GetChecked() and true or false

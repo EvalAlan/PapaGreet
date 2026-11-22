@@ -4,7 +4,7 @@ PapaGreet is a World of Warcraft addon that automates greetings and farewells in
 
 ## WoW Forever
 
-Forever uses interface `16001`. Install the addon in `_forever_/Interface/AddOns/PapaGreet` with `PapaGreet.toc`, the Lua files, `Bindings.xml`, and `Media/Greeting.tga`. Existing character profiles are migrated without replacing their messages. Forever defaults to goodbye without leaving; use the profile checkbox or `/papa leave` to leave explicitly. Nearby and campsite greetings are manual actions, not automatic proximity detection. Default now includes more nearby and campsite lines, and its messages and emotes can be edited.
+Forever uses interface `16001`. Install the addon in `_forever_/Interface/AddOns/PapaGreet` with `PapaGreet.toc`, the Lua files, `Bindings.xml`, and the `Media` folder. Existing character profiles are migrated without replacing their messages. Forever defaults to goodbye without leaving; use the profile checkbox or `/papa leave` to leave explicitly. Nearby and campsite actions are manual, not automatic proximity detection. A fresh Default profile has at least five editable starter lines for every message action. Existing profiles receive the fifth line only when that pool still matches the unchanged starter set.
 
 ## Installation
 
@@ -22,6 +22,7 @@ PapaGreet adds a movable button to your screen with the following controls:
 
 - **Left Click**: Send a random greeting and emote
 - **Right Click**: Send a random goodbye and emote; optionally leave the group after a delay (off by default in Forever)
+- When solo, **Right Click** uses the separate solo goodbye messages in SAY and never starts a leave timer.
 - **Ctrl+Left Click**: Open the settings menu
 - **Ctrl+Right Click**: Cancel the pending farewell/leave action
 - **Alt+Left Click**: Send a nearby greeting in SAY
@@ -32,15 +33,15 @@ PapaGreet adds a movable button to your screen with the following controls:
 
 ### Chat Channels
 
-Messages go to PARTY, RAID, or INSTANCE_CHAT according to your actual group type. Solo greetings use SAY. Nearby and campsite greetings always use SAY.
+Messages go to PARTY, RAID, or INSTANCE_CHAT according to your actual group type. Solo greetings and goodbyes use SAY. Nearby and campsite greetings always use SAY.
 
 ### Settings Menu
 
-Access the settings menu with **Ctrl+Left Click** or the `/papa menu` command.
+Access the settings menu with **Ctrl+Left Click** or the `/papa menu` command. Use **Messages** for group and solo goodbyes and emotes; use **RP / Camp** for nearby greetings, campsite greetings, campsite goodbyes, and thank-you lines. Existing profiles receive starter solo and campsite lines when they first load the updated addon.
 
 From the menu you can:
 - Create, delete, and copy custom profiles; edit the built-in Default profile
-- Add, edit, and delete custom greetings, goodbyes, nearby greetings, campsite greetings, and emotes
+- Add, edit, and delete custom greetings, group goodbyes, solo goodbyes, nearby greetings, campsite greetings, campsite departures, thank-you messages, and emotes
 - Choose whether right-click goodbye also leaves the group
 - Add/remove custom emotes for greetings and goodbyes
 - Adjust emote delay (time between message and emote)
@@ -65,6 +66,8 @@ Type `/papa` to see all available commands:
 - `/papa leave` - Send goodbye and leave after the configured delay
 - `/papa nearby` - Send a nearby greeting in SAY
 - `/papa camp` - Send a campsite greeting in SAY
+- `/papa campbye` - Leave a campsite with a farewell in SAY
+- `/papa thanks` - Thank someone in SAY
 - `/papa cancel` - Cancel the pending leave action
 - `/papa menu` - Toggle the settings menu
 - `/papa hide` - Hide the button
@@ -80,9 +83,25 @@ PapaGreet supports custom keybindings that can be configured in the WoW keybindi
 - **Send Greeting** - Trigger a greeting without clicking the button
 - **Send Goodbye** - Trigger goodbye using the profile leave setting
 - **Send Goodbye & Leave** - Explicitly trigger goodbye and leave
-- **Nearby Greeting** and **Campsite Greeting** - Send the corresponding SAY message
+- **Nearby Greeting**, **Campsite Greeting**, **Leave Campsite**, and **Thank Someone** - Send the corresponding SAY message
 - **Cancel Leave** - Cancel the pending leave action
 - **Toggle Menu** - Open/close the settings menu
+
+### Macros and custom icons
+
+Make a WoW macro with one `/papa` command, then choose its icon in the macro editor. These icons are included in `Media`:
+
+| Macro command | Icon file |
+| --- | --- |
+| `/papa greet` | `Greeting.tga` |
+| `/papa nearby` | `Nearby.tga` |
+| `/papa camp` | `CampGreeting.tga` |
+| `/papa byeonly` or `/papa bye` | `Goodbye.tga` |
+| `/papa leave` | `LeaveGroup.tga` |
+| `/papa campbye` | `CampLeave.tga` |
+| `/papa thanks` | `Thanks.tga` |
+
+Copy each file you want from `Media` to `_forever_/Interface/Icons` with a recognizable name such as `PAPAGREET_NEARBY.tga`. Create the `Icons` folder if needed and fully restart WoW before editing the macros. The images are 64×64 uncompressed TGA files. Each WoW installation needs its own `Interface/Icons` copies. `/papa bye` follows the profile's auto-leave setting; use `/papa byeonly` for a guaranteed farewell without leaving.
 
 ### Visual Countdown
 

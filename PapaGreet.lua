@@ -107,7 +107,15 @@ local function Initialize()
                         "Farewell, champions. May your blade be sharp and your armor strong.",
                         "Until we meet again, heroes.",
                         "Safe travels, adventurers.",
-                        "Until next time champions!"
+                        "Until next time champions!",
+                        "It was good traveling with you. Farewell!",
+                    },
+                    soloGoodbyes = {
+                        "Until next time!",
+                        "Time to hit the road. Safe travels!",
+                        "Farewell for now!",
+                        "The road calls. See you around!",
+                        "Take care out there!",
                     },
                     greetingEmotes = {
                         "wave", "crack", "cheer", "charge", "brandish",
@@ -132,7 +140,22 @@ local function Initialize()
                         "That fire is a welcome sight.",
                         "Rest well before the road calls again.",
                     },
+                    campGoodbyes = {
+                        "Thanks for the warmth. Safe travels!",
+                        "The fire was welcome. Until next time!",
+                        "I should be on my way. Farewell!",
+                        "May your fire burn bright. Goodbye!",
+                        "The road awaits. Thank you for the company!",
+                    },
+                    thanksMessages = {
+                        "Much appreciated. I owe you one.",
+                        "Thank you for the help.",
+                        "That was kind of you. Thank you.",
+                        "I won't forget that. Thanks.",
+                        "Your help made a difference. Thank you.",
+                    },
                     starterPoolsVersion = 1,
+                    actionPoolsVersion = 1,
                 }
             },
             currentProfile = DEFAULT_PROFILE,
@@ -176,11 +199,32 @@ local function Initialize()
     for _, profile in pairs(PapaGreetSavedVariables.profiles) do
         if profile.cooldown == nil then profile.cooldown = 3 end
         if profile.autoLeave == nil then profile.autoLeave = not PapaGreetAPI.isForever end
+        if profile.soloGoodbyes == nil then
+            profile.soloGoodbyes = {
+                "Until next time!", "Time to hit the road. Safe travels!",
+                "Farewell for now!", "The road calls. See you around!",
+                "Take care out there!",
+            }
+        end
         if profile.nearbyGreetings == nil then
             profile.nearbyGreetings = {"Well met, traveler!", "Safe travels!"}
         end
         if profile.campGreetings == nil then
             profile.campGreetings = {"Mind if I join you by the fire?", "A fine place to rest. Well met!"}
+        end
+        if profile.campGoodbyes == nil then
+            profile.campGoodbyes = {
+                "Thanks for the warmth. Safe travels!", "The fire was welcome. Until next time!",
+                "I should be on my way. Farewell!", "May your fire burn bright. Goodbye!",
+                "The road awaits. Thank you for the company!",
+            }
+        end
+        if profile.thanksMessages == nil then
+            profile.thanksMessages = {
+                "Much appreciated. I owe you one.", "Thank you for the help.",
+                "That was kind of you. Thank you.", "I won't forget that. Thanks.",
+                "Your help made a difference. Thank you.",
+            }
         end
     end
     -- Upgrade Default and profiles copied from its old two-line starter pools.
@@ -211,6 +255,32 @@ local function Initialize()
                 for _, message in ipairs(newCamp) do AddMissing(profile.campGreetings, message) end
             end
             profile.starterPoolsVersion = 1
+        end
+        -- Add a fifth line only to unchanged starter pools. The marker keeps
+        -- a later user deletion from being undone on the next reload.
+        if not profile.actionPoolsVersion then
+            if SameMessages(profile.goodbyes, {
+                "Farewell, champions. May your blade be sharp and your armor strong.",
+                "Until we meet again, heroes.", "Safe travels, adventurers.",
+                "Until next time champions!"}) then
+                AddMissing(profile.goodbyes, "It was good traveling with you. Farewell!")
+            end
+            if SameMessages(profile.soloGoodbyes, {
+                "Until next time!", "Time to hit the road. Safe travels!",
+                "Farewell for now!", "The road calls. See you around!"}) then
+                AddMissing(profile.soloGoodbyes, "Take care out there!")
+            end
+            if SameMessages(profile.campGoodbyes, {
+                "Thanks for the warmth. Safe travels!", "The fire was welcome. Until next time!",
+                "I should be on my way. Farewell!", "May your fire burn bright. Goodbye!"}) then
+                AddMissing(profile.campGoodbyes, "The road awaits. Thank you for the company!")
+            end
+            if SameMessages(profile.thanksMessages, {
+                "Much appreciated. I owe you one.", "Thank you for the help.",
+                "That was kind of you. Thank you.", "I won't forget that. Thanks."}) then
+                AddMissing(profile.thanksMessages, "Your help made a difference. Thank you.")
+            end
+            profile.actionPoolsVersion = 1
         end
     end
     return PapaGreetSavedVariables.currentProfile
@@ -442,6 +512,24 @@ local function HandleGreeting(kind)
     UpdateCooldownDisplay()
 end
 
+-- Manual RP lines always use SAY, even while grouped. They never trigger leave.
+local function HandleRoleplayAction(poolKey)
+    local profile = GetProfile()
+    local cooldown = profile.cooldown or 0
+    if cooldown > 0 and IsOnCooldown(lastGreetingTime, cooldown) then
+        Notice(string.format("Action on cooldown (%.1fs remaining)", GetCooldownRemaining(lastGreetingTime, cooldown)), 1, 0.5, 0)
+        return
+    end
+    local message = PickMessage(profile[poolKey], PapaGreetSavedVariables.currentProfile .. ":" .. poolKey)
+    if not message then
+        Notice("No messages configured for this action. Use /papa menu.", 1, 0, 0)
+        return
+    end
+    QueueOrSend(MakeAction(message, nil, 0, "SAY", false))
+    lastGreetingTime = GetTime()
+    UpdateCooldownDisplay()
+end
+
 local function HandleGoodbye(forceLeave)
     local profile = GetProfile()
     local cooldown = profile.cooldown or 0
@@ -449,17 +537,18 @@ local function HandleGoodbye(forceLeave)
         Notice(string.format("Goodbye on cooldown (%.1fs remaining)", GetCooldownRemaining(lastGoodbyeTime, cooldown)), 1, 0.5, 0)
         return
     end
-    local goodbye = PickMessage(profile.goodbyes, PapaGreetSavedVariables.currentProfile .. ":goodbyes")
+    local channel = DetermineChatChannel()
+    local poolKey = channel == "SAY" and "soloGoodbyes" or "goodbyes"
+    local goodbye = PickMessage(profile[poolKey], PapaGreetSavedVariables.currentProfile .. ":" .. poolKey)
     if not goodbye then
-        Notice("No goodbyes configured. Use /papa menu.", 1, 0, 0)
+        Notice("No " .. (channel == "SAY" and "solo " or "group ") .. "goodbyes configured. Use /papa menu.", 1, 0, 0)
         return
     end
     local leave = forceLeave
     if leave == nil then leave = profile.autoLeave end
     CancelLeave(true)
-    local channel = DetermineChatChannel()
     local emote = PickMessage(profile.goodbyeEmotes, PapaGreetSavedVariables.currentProfile .. ":goodbyeEmotes")
-    local action = MakeAction(goodbye, emote, profile.delayEmote, channel, leave)
+    local action = MakeAction(goodbye, emote, profile.delayEmote, channel, leave and channel ~= "SAY")
     action.delayLeave = profile.delayLeave
     if leave and action.group then pendingFarewell = action end
     QueueOrSend(action)
@@ -575,6 +664,8 @@ BINDING_NAME_PAPAGREET_GOODBYE = "Send Goodbye"
 BINDING_NAME_PAPAGREET_LEAVE = "Send Goodbye & Leave"
 BINDING_NAME_PAPAGREET_NEARBY = "Nearby Greeting"
 BINDING_NAME_PAPAGREET_CAMP = "Campsite Greeting"
+BINDING_NAME_PAPAGREET_CAMPBYE = "Leave Campsite"
+BINDING_NAME_PAPAGREET_THANKS = "Thank Someone"
 BINDING_NAME_PAPAGREET_CANCEL = "Cancel Leave"
 BINDING_NAME_PAPAGREET_MENU = "Toggle Menu"
 
@@ -596,6 +687,14 @@ end
 
 function PapaGreet_SendCampGreeting()
     HandleGreeting("camp")
+end
+
+function PapaGreet_LeaveCamp()
+    HandleRoleplayAction("campGoodbyes")
+end
+
+function PapaGreet_SendThanks()
+    HandleRoleplayAction("thanksMessages")
 end
 
 function PapaGreet_CancelLeave()
@@ -620,6 +719,8 @@ SlashCmdList["PAPA"] = function(cmd)
         print("  |cffffd700/papa leave|r - Send goodbye and leave")
         print("  |cffffd700/papa nearby|r - Greet nearby players in SAY")
         print("  |cffffd700/papa camp|r - Campsite greeting in SAY")
+        print("  |cffffd700/papa campbye|r - Leave a campsite in SAY")
+        print("  |cffffd700/papa thanks|r - Thank someone in SAY")
         print("  |cffffd700/papa cancel|r - Cancel leave timer")
         print("  |cffffd700/papa menu|r - Toggle settings menu")
         print("  |cffffd700/papa hide|r - Hide button")
@@ -642,6 +743,10 @@ SlashCmdList["PAPA"] = function(cmd)
         HandleGreeting("nearby")
     elseif command == "camp" then
         HandleGreeting("camp")
+    elseif command == "campbye" then
+        HandleRoleplayAction("campGoodbyes")
+    elseif command == "thanks" then
+        HandleRoleplayAction("thanksMessages")
     elseif command == "cancel" then
         CancelLeave()
     elseif command == "menu" then
