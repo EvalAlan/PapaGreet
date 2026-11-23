@@ -1,7 +1,7 @@
 ## Title: PapaGreet
 ## Notes: Greetings and farewells for WoW Forever
 ## Author: Alan Denniston
-## Version: 1.4.0
+## Version: 1.4.1
 ## Interface: 16001
 ## SavedVariablesPerCharacter: PapaGreetSavedVariables
 
